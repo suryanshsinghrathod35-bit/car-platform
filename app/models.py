@@ -1,6 +1,6 @@
 from datetime import datetime
-from sqlalchemy import (CheckConstraint, ForeignKey, Integer, String,
-                        UniqueConstraint, DateTime)
+from sqlalchemy import (JSON, CheckConstraint, DateTime, Float, ForeignKey, Integer,
+                        String, Text, UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
 from .enums import FuelType, Transmission
@@ -59,3 +59,78 @@ class Variant(Base):
     source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     last_verified: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     car_model: Mapped[CarModel] = relationship(back_populates="variants")
+
+
+class SafetyRating(Base):
+    """One official crash-test result page. Absence of a row means 'no rating on record',
+    never zero stars."""
+    __tablename__ = "safety_ratings"
+    __table_args__ = (
+        UniqueConstraint("agency", "external_id"),
+        CheckConstraint("agency IN ('BNCAP', 'GNCAP')", name="agency_valid"),
+        CheckConstraint("adult_stars BETWEEN 0 AND 5 AND child_stars BETWEEN 0 AND 5",
+                        name="stars_range"),
+        CheckConstraint("aop_max > 0 AND aop_score >= 0 AND aop_score <= aop_max",
+                        name="aop_range"),
+        CheckConstraint("cop_max > 0 AND cop_score >= 0 AND cop_score <= cop_max",
+                        name="cop_range"),
+        CheckConstraint("source_url LIKE 'http%'", name="source_url_http"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model_id: Mapped[int | None] = mapped_column(ForeignKey("car_models.id"), nullable=True)
+    agency: Mapped[str] = mapped_column(String(10))
+    external_id: Mapped[str] = mapped_column(String(120))
+    title: Mapped[str] = mapped_column(String(200))
+    period_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    adult_stars: Mapped[int] = mapped_column(Integer)
+    child_stars: Mapped[int] = mapped_column(Integer)
+    aop_score: Mapped[float] = mapped_column(Float)
+    aop_max: Mapped[float] = mapped_column(Float)
+    cop_score: Mapped[float] = mapped_column(Float)
+    cop_max: Mapped[float] = mapped_column(Float)
+    frontal_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frontal_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    side_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    side_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pole_result: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    cop_dynamic: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cop_dynamic_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cop_crs_install: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cop_crs_install_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cop_vehicle_assess: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cop_vehicle_assess_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tested_variant: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    body_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    crash_test_weight_kg: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    country_of_origin: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    publication_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    assessed_on_text: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    revision_text: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    fact_sheet_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    equipment: Mapped[dict] = mapped_column(JSON, default=dict)
+    child_restraints: Mapped[list] = mapped_column(JSON, default=list)
+    applicability: Mapped[list] = mapped_column(JSON, default=list)
+    parse_warnings: Mapped[list] = mapped_column(JSON, default=list)
+    # provenance: where it came from and when we last looked (naive UTC)
+    source_url: Mapped[str] = mapped_column(String(500))
+    content_sha256: Mapped[str] = mapped_column(String(64))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime)
+    last_checked_at: Mapped[datetime] = mapped_column(DateTime)
+    car_model: Mapped["CarModel | None"] = relationship()
+
+
+class IngestionRun(Base):
+    __tablename__ = "ingestion_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(40))
+    started_at: Mapped[datetime] = mapped_column(DateTime)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    seen: Mapped[int] = mapped_column(Integer, default=0)
+    created: Mapped[int] = mapped_column(Integer, default=0)
+    updated: Mapped[int] = mapped_column(Integer, default=0)
+    unchanged: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    unmapped: Mapped[int] = mapped_column(Integer, default=0)
+    aborted: Mapped[bool] = mapped_column(default=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)

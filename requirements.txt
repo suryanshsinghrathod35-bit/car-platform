@@ -4,3 +4,4 @@ sqlalchemy>=2.0
 pydantic>=2
 pytest
 httpx
+beautifulsoup4

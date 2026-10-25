@@ -72,8 +72,54 @@ class CarModelOut(BaseModel):
     brand_slug: str
 
 
+class SafetyRatingSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    agency: str
+    external_id: str
+    title: str
+    period_label: str | None = None
+    adult_stars: int
+    child_stars: int
+    aop_score: float
+    aop_max: float
+    cop_score: float
+    cop_max: float
+    tested_variant: str | None = None
+    revision: int | None = None
+    fact_sheet_url: str | None = None
+    source_url: str
+    last_checked_at: datetime
+
+
+class SafetyRatingDetail(SafetyRatingSummary):
+    frontal_score: float | None = None
+    frontal_max: float | None = None
+    side_score: float | None = None
+    side_max: float | None = None
+    pole_result: str | None = None
+    cop_dynamic: float | None = None
+    cop_dynamic_max: float | None = None
+    cop_crs_install: float | None = None
+    cop_crs_install_max: float | None = None
+    cop_vehicle_assess: float | None = None
+    cop_vehicle_assess_max: float | None = None
+    body_type: str | None = None
+    crash_test_weight_kg: int | None = None
+    country_of_origin: str | None = None
+    publication_year: int | None = None
+    assessed_on_text: str | None = None
+    revision_text: str | None = None
+    equipment: dict = {}
+    child_restraints: list = []
+    applicability: list = []
+    parse_warnings: list = []
+    fetched_at: datetime
+
+
 class CarModelDetail(CarModelOut):
     variants: list[VariantOut] = []
+    # An empty list means "no official rating on record", never "zero stars".
+    safety_ratings: list[SafetyRatingSummary] = []
 
 
 class BrandOut(BaseModel):

@@ -13,7 +13,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Indian Car Platform - Phase 1", lifespan=lifespan)
+app = FastAPI(title="Indian Car Platform", lifespan=lifespan)
 
 
 def _model_out(m: models.CarModel) -> dict:
@@ -76,7 +76,35 @@ def list_models(
 @app.get("/models/{brand}/{model}", response_model=schemas.CarModelDetail)
 def model_detail(brand: str, model: str, db: Session = Depends(get_db)):
     m = _get_model(db, brand, model)
-    return {**_model_out(m), "variants": m.variants}
+    ratings = db.scalars(select(models.SafetyRating)
+                         .where(models.SafetyRating.model_id == m.id)
+                         .order_by(models.SafetyRating.external_id)).all()
+    return {**_model_out(m), "variants": m.variants, "safety_ratings": ratings}
+
+
+@app.get("/safety/bncap", response_model=list[schemas.SafetyRatingSummary])
+def list_bncap(
+    mapped: bool | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    q = select(models.SafetyRating).where(models.SafetyRating.agency == "BNCAP")
+    if mapped is True:
+        q = q.where(models.SafetyRating.model_id.is_not(None))
+    elif mapped is False:
+        q = q.where(models.SafetyRating.model_id.is_(None))
+    return db.scalars(q.order_by(models.SafetyRating.external_id).offset(offset).limit(limit)).all()
+
+
+@app.get("/safety/bncap/{external_id}", response_model=schemas.SafetyRatingDetail)
+def bncap_detail(external_id: str, db: Session = Depends(get_db)):
+    r = db.scalars(select(models.SafetyRating).where(
+        models.SafetyRating.agency == "BNCAP",
+        models.SafetyRating.external_id == external_id)).first()
+    if not r:
+        raise HTTPException(404, "rating not found")
+    return r
 
 
 @app.post("/models/{brand}/{model}/variants",
