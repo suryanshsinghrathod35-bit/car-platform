@@ -76,3 +76,17 @@ def test_database_rejects_duplicate_rating_page(db):
     with pytest.raises(IntegrityError):
         db.commit()
     db.rollback()
+
+
+def test_discontinued_rating_is_visible_through_the_api(api, db, html):
+    url = "https://www.bncap.in/vehicle/tata-punch-ev/"
+    run_ingestion(db, pages_of(FakeFetcher({url: html["tata-punch-ev"]}), [url]))
+    d = api.get("/safety/bncap/tata-punch-ev").json()
+    assert d["is_current"] is False
+    assert d["period_label"] == "May 2024- February 2026"
+    assert "Sales discontinued" in d["period_note"]
+
+
+def test_current_rating_says_so_on_the_model_page(api, loaded):
+    s = api.get("/models/tata/nexon").json()["safety_ratings"][0]
+    assert s["is_current"] is True and s["period_label"].endswith("Onwards")

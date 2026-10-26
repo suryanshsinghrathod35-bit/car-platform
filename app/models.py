@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import (JSON, CheckConstraint, DateTime, Float, ForeignKey, Integer,
+from sqlalchemy import (JSON, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer,
                         String, Text, UniqueConstraint)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from .db import Base
@@ -82,6 +82,9 @@ class SafetyRating(Base):
     external_id: Mapped[str] = mapped_column(String(120))
     title: Mapped[str] = mapped_column(String(200))
     period_label: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    period_note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    # True = "<date> - Onwards"; False = the rating period has ended (e.g. sales discontinued)
+    is_current: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     adult_stars: Mapped[int] = mapped_column(Integer)
     child_stars: Mapped[int] = mapped_column(Integer)
     aop_score: Mapped[float] = mapped_column(Float)

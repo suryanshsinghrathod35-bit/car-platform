@@ -107,8 +107,10 @@ def test_discover_uses_index_then_vehicle_sitemaps():
 
 
 def test_offline_dir_mode_ingests_saved_pages(db):
+    expected = len([p for p in FIXTURES.glob("*.html") if p.stem != "list"])   # vehicle pages only
+    assert expected >= 6
     res = run_ingestion(db, dir_pages(FIXTURES))
-    assert (res.created, res.failed) == (2, 0)          # list.html and sitemaps are skipped/ignored
+    assert (res.created, res.failed) == (expected, 0)   # list page and sitemaps are skipped
 
 
 # ---------------- HttpFetcher against a real local server ----------------
@@ -121,7 +123,15 @@ def server():
         def log_message(self, *a): pass
         def do_GET(self):
             seen.append((self.path, self.headers.get("User-Agent")))
-            if self.path == "/robots.txt":
+            if self.path == "/drop":                  # close without answering: a connection reset
+                self.close_connection = True
+                return
+            if self.path == "/flaky":                 # reset on the first request, then fine
+                if sum(1 for p, _ in seen if p == "/flaky") == 1:
+                    self.close_connection = True
+                    return
+                body = b"<html>recovered</html>"
+            elif self.path == "/robots.txt":
                 body = b"User-agent: *\nDisallow: /private/\n"
             elif self.path == "/boom":
                 self.send_response(500); self.end_headers(); return
@@ -172,3 +182,30 @@ def test_fetcher_fails_closed_if_robots_unreadable():
     f._request = lambda url: (_ for _ in ()).throw(FetchError("HTTP 503 for robots"))
     with pytest.raises(FetchError, match="robots"):
         f.get("http://127.0.0.1:9/x")
+
+
+# ---- regression: "WinError 10054 / connection reset" crashed the run with a traceback ----
+
+def test_fetcher_retries_after_a_connection_reset(server):
+    base, seen = server
+    assert make(retries=2).get(base + "/flaky") == "<html>recovered</html>"
+    assert sum(1 for p, _ in seen if p == "/flaky") == 2
+
+
+def test_fetcher_turns_repeated_resets_into_fetcherror_not_a_crash(server):
+    base, seen = server
+    with pytest.raises(FetchError, match="giving up"):
+        make(retries=2).get(base + "/drop")
+    assert sum(1 for p, _ in seen if p == "/drop") == 3          # 1 try + 2 retries, then stop
+
+
+def test_a_reset_page_is_counted_as_failed_and_the_run_continues(db, html):
+    class Resetting(FakeFetcher):
+        def get(self, url):
+            if "flaky" in url:
+                raise FetchError(f"giving up on {url}: [WinError 10054]")
+            return super().get(url)
+    f = Resetting({DZ: html["dzire"]})
+    flaky = "https://www.bncap.in/vehicle/flaky/"
+    res = run_ingestion(db, pages_of(f, [flaky, DZ]))
+    assert (res.created, res.failed, res.aborted) == (1, 1, False)

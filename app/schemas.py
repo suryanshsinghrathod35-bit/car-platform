@@ -78,6 +78,8 @@ class SafetyRatingSummary(BaseModel):
     external_id: str
     title: str
     period_label: str | None = None
+    period_note: str | None = None
+    is_current: bool | None = None
     adult_stars: int
     child_stars: int
     aop_score: float

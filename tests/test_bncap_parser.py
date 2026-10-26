@@ -117,3 +117,82 @@ def test_changed_breakdown_is_flagged_not_hidden(html):
     broken = html["dzire"].replace("14.17 out of 16.00", "9.99 out of 16.00")
     d = parse_vehicle_page(broken)
     assert any("do not add up" in w for w in d["parse_warnings"])
+
+
+# ---------------- real pages where adult and child stars DIFFER ----------------
+# These pin down the one assumption the first two fixtures could not: the first star
+# widget on a page is ADULT and the second is CHILD.
+
+def test_aircross_adult5_child4_matches_independent_sources(html):
+    """Expected values come from Citroen's own announcement and press coverage, not the parser:
+    AOP 27.05/32 = 5 stars, COP 40/49 = 4 stars, child dynamic 24/24, CRS install 12/12,
+    vehicle assessment 4/13."""
+    d = parse_vehicle_page(html["citroen-c3-aircross-5-seater"])
+    assert (d["adult_stars"], d["child_stars"]) == (5, 4)
+    assert (d["aop_score"], d["cop_score"]) == (27.05, 40.0)
+    assert (d["cop_dynamic"], d["cop_crs_install"], d["cop_vehicle_assess"]) == (24.0, 12.0, 4.0)
+    assert d["assessed_on_text"] == "July 2025"
+    assert d["parse_warnings"] == []
+
+
+def test_baleno_six_airbag_adult4_child3_regression(html):
+    """Regression values read from the saved page (not independently verified)."""
+    d = parse_vehicle_page(html["maruti-baleno-gasoline-6-airbags"])
+    assert (d["adult_stars"], d["child_stars"]) == (4, 3)
+    assert (d["aop_score"], d["cop_score"]) == (26.52, 34.81)
+    assert d["parse_warnings"] == []
+
+
+VEHICLE_FIXTURES = ["dzire", "nexon", "citroen-c3-aircross-5-seater",
+                    "maruti-baleno-gasoline-6-airbags", "tata-punch-ev", "hyundai-tucson-gasoline"]
+
+
+def test_higher_score_never_gets_fewer_stars_across_all_fixtures(html):
+    parsed = [parse_vehicle_page(html[n]) for n in VEHICLE_FIXTURES]
+    for a in parsed:
+        for b in parsed:
+            if a["aop_score"] > b["aop_score"]:
+                assert a["adult_stars"] >= b["adult_stars"], (a["external_id"], b["external_id"])
+            if a["cop_score"] > b["cop_score"]:
+                assert a["child_stars"] >= b["child_stars"], (a["external_id"], b["external_id"])
+
+
+@pytest.mark.parametrize("name", VEHICLE_FIXTURES)
+def test_every_real_fixture_parses_cleanly(html, name):
+    d = parse_vehicle_page(html[name])
+    assert d["parse_warnings"] == []
+    assert d["period_label"] and d["is_current"] is not None
+    assert d["assessed_on_text"]
+    assert any(len(r) > 1 for t in d["applicability"] for r in t)   # variant rows captured
+
+
+# ---------------- validity period / discontinued cars ----------------
+
+def test_current_cars_are_marked_current(html):
+    for name in ("dzire", "nexon", "citroen-c3-aircross-5-seater"):
+        d = parse_vehicle_page(html[name])
+        assert d["is_current"] is True and d["period_label"].endswith("Onwards")
+        assert d["period_note"] is None
+
+
+def test_discontinued_cars_are_flagged_with_their_note(html):
+    ev = parse_vehicle_page(html["tata-punch-ev"])
+    assert ev["is_current"] is False
+    assert ev["period_label"] == "May 2024- February 2026"
+    assert "Sales discontinued" in ev["period_note"]
+    tu = parse_vehicle_page(html["hyundai-tucson-gasoline"])
+    assert tu["is_current"] is False and tu["period_label"] == "November 2024- September 2025"
+    assert "September 2025" in tu["period_note"]
+
+
+def test_baleno_variant_table_is_no_longer_dropped(html):
+    """Regression: this table says 'Ratings Applicability' (not 'Sr No.'), and was silently skipped."""
+    d = parse_vehicle_page(html["maruti-baleno-gasoline-6-airbags"])
+    flat = " ".join(c for t in d["applicability"] for r in t for c in r)
+    assert "ZETA 1.2L ISS 5MT" in flat and "ALPHA 1.2L ISS AGS" in flat
+    assert d["assessed_on_text"] == "April 2024"
+
+
+def test_missing_assessment_date_is_flagged_not_silent(html):
+    broken = html["maruti-baleno-gasoline-6-airbags"].replace("April 2024", "TBD")
+    assert "assessment date not found" in parse_vehicle_page(broken)["parse_warnings"]

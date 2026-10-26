@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import os
 import time
@@ -70,13 +71,22 @@ class HttpFetcher:
                 self._last = time.monotonic()
                 if e.code == 429 or e.code >= 500:
                     last_err = e
-                    self._sleep(min(60, 2 ** attempt * max(self.delay, 1.0)))
+                    self._sleep(self._backoff(attempt, e.headers.get("Retry-After")))
                     continue
                 raise FetchError(f"HTTP {e.code} for {url}") from e
-            except (urllib.error.URLError, TimeoutError) as e:
+            except (OSError, http.client.HTTPException) as e:
+                # OSError covers URLError, timeouts, TLS errors and ConnectionResetError
+                # (WinError 10054, "connection forcibly closed"), which urllib does NOT wrap.
+                self._last = time.monotonic()
                 last_err = e
-                self._sleep(min(60, 2 ** attempt * max(self.delay, 1.0)))
+                self._sleep(self._backoff(attempt, None))
         raise FetchError(f"giving up on {url}: {last_err}")
+
+    def _backoff(self, attempt: int, retry_after: str | None) -> float:
+        """Seconds to wait before retrying: the server's Retry-After if it gave one, else exponential."""
+        if retry_after and retry_after.strip().isdigit():
+            return min(120.0, float(retry_after))
+        return min(60.0, 2 ** attempt * max(self.delay, 1.0))
 
     def _allowed(self, url: str) -> bool:
         p = urlparse(url)
@@ -249,7 +259,12 @@ def main() -> None:
             pages = live_pages(HttpFetcher(contact, delay=a.delay), a.limit)
         else:
             pages = dir_pages(a.from_dir)
-        res = run_ingestion(db, pages, raw_dir=a.raw_dir)
+        try:
+            res = run_ingestion(db, pages, raw_dir=a.raw_dir)
+        except FetchError as e:
+            raise SystemExit(f"Stopped: {e}\nNothing is lost: pages already saved stay saved, and "
+                             "re-running is safe. If the site keeps closing the connection, wait "
+                             "a while and try again with a larger --delay.")
     print(f"seen={res.seen} created={res.created} updated={res.updated} unchanged={res.unchanged} "
           f"failed={res.failed} unmapped={res.unmapped} aborted={res.aborted}")
     for e in res.errors:

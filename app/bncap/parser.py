@@ -83,7 +83,22 @@ def parse_vehicle_page(html: str, source_url: str | None = None) -> dict:
         raise ParseError("no title found")
 
     warnings: list[str] = []
-    period = next((_t(h) for h in soup.find_all("h2") if "onwards" in _t(h).lower()), None)
+    # Validity period. Current cars say "June 2025 - Onwards"; discontinued ones say
+    # "May 2024- February 2026*" and add a note ("*Sales discontinued ...").
+    period_re = re.compile(
+        rf"^(?:{MONTHS})\s+\d{{4}}\s*-\s*(?:Onwards|(?:{MONTHS})\s+\d{{4}})\*?$", re.I)
+    period = note = is_current = None
+    h2_texts = [_t(h) for h in soup.find_all("h2")]
+    for t in h2_texts:
+        if period_re.match(t):
+            period = t.rstrip("*").strip()
+            is_current = period.lower().endswith("onwards")
+            break
+    if period is None:                      # looser fallback: any heading that says "Onwards"
+        loose = next((t for t in h2_texts if "onwards" in t.lower()), None)
+        if loose:
+            period, is_current = loose.rstrip("*").strip(), True
+    note = next((t.lstrip("*").strip() for t in h2_texts if t.startswith("*")), None)
     if period is None:
         warnings.append("period label not found")
 
@@ -148,7 +163,7 @@ def parse_vehicle_page(html: str, source_url: str | None = None) -> dict:
                     "front": float(fm.group(1)) if fm else None,
                     "side": float(sm.group(1)) if sm else None,
                     "crs_type": cells[3], "adjust": cells[4], "position": cells[5]})
-        elif re.search(r"rating applies|Revision|Sr\.? ?No", flat, re.I):
+        elif re.search(r"rating applies|Revision|Sr\.? ?No|Month & Year of Assessment|Ratings Applicability", flat, re.I):
             applic_tables.append(rows)
     if not spec:
         warnings.append("specifications table not found")
@@ -156,6 +171,8 @@ def parse_vehicle_page(html: str, source_url: str | None = None) -> dict:
         warnings.append("safety equipment table not found")
     if not applic_tables:
         warnings.append("ratings applicability tables not found")
+    elif not any(len(r) > 1 for rows in applic_tables for r in rows):
+        warnings.append("no applicable-variant rows found")
 
     applic_text = " ".join(" ".join(" ".join(r) for r in rows) for rows in applic_tables)
     # The assessment date is a table cell that is *only* "<Month> <Year>". (A looser search
@@ -164,6 +181,8 @@ def parse_vehicle_page(html: str, source_url: str | None = None) -> dict:
                         if re.fullmatch(rf"(?:{MONTHS})\s+\d{{4}}", c)), None)
     rev = [(int(n), d) for n, d in re.findall(r"Revision\s*(\d+)\s*-\s*([A-Za-z]+\.?\s+\d{4})", applic_text)]
     revision, revision_text = max(rev) if rev else (None, None)
+    if assessed_on is None:
+        warnings.append("assessment date not found")
 
     pdf = next((a["href"] for a in soup.find_all("a", href=True)
                 if a["href"].lower().split("?")[0].endswith(".pdf")), None)
@@ -174,6 +193,7 @@ def parse_vehicle_page(html: str, source_url: str | None = None) -> dict:
 
     return {
         "external_id": slug, "title": title, "period_label": period,
+        "period_note": note, "is_current": is_current,
         "adult_stars": adult_stars, "child_stars": child_stars,
         "aop_score": aop, "aop_max": aop_max, "cop_score": cop, "cop_max": cop_max,
         "frontal_score": frontal, "frontal_max": frontal_max,
